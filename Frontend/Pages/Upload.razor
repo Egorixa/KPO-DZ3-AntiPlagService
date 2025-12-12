@@ -1,0 +1,111 @@
+@page "/"
+@using Shared
+@inject HttpClient Http
+
+<PageTitle>Сдача работы</PageTitle>
+
+<div class="container mt-5">
+    <div class="card shadow">
+        <div class="card-header bg-primary text-white">
+            <h3>Отправка работы на проверку</h3>
+        </div>
+        <div class="card-body">
+            
+            <div class="mb-3">
+                <label>Ваше имя:</label>
+                <input @bind="_uploadModel.AuthorName" class="form-control" placeholder="Иванов И.И." />
+            </div>
+
+            <div class="mb-3">
+                <label>Название задания:</label>
+                <input @bind="_uploadModel.AssignmentName" class="form-control" placeholder="Лабораторная №3" />
+            </div>
+            
+            <div class="mb-3">
+                <label>Файл (.txt):</label>
+                <InputFile OnChange="@LoadFile" class="form-control" />
+            </div>
+
+            <button class="btn btn-success w-100" @onclick="SubmitWork" disabled="@_isProcessing">
+                @if (_isProcessing) { <span>Обработка...</span> } else { <span>Отправить</span> }
+            </button>
+
+            @if (_result != null)
+            {
+                <div class="mt-4 alert @(_result.IsPlag ? "alert-danger" : "alert-success")">
+                    <h4>Результат проверки:</h4>
+                    <p><strong>ID файла:</strong> @_result.FileId</p>
+                    <p><strong>Процент плагиата:</strong> @_result.PlagPercent%</p>
+                    <p><strong>Статус:</strong> @(_result.IsPlag ? "ПЛАГИАТ ОБНАРУЖЕН" : "Работа принята")</p>
+                </div>
+            }
+            
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="alert alert-warning mt-3">@_errorMessage</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    // методы для загрузки файла и отправки данных на сервер
+    private FileData _uploadModel = new FileData();
+    private AnalysisResult? _result;
+    private bool _isProcessing = false;
+    private string _errorMessage = "";
+
+    private async Task LoadFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file != null)
+        {
+            _uploadModel.FileName = file.Name;
+            // 5 МБ
+            using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            _uploadModel.Content = ms.ToArray();
+        }
+    }
+
+    private async Task SubmitWork()
+    {
+        _isProcessing = true;
+        _errorMessage = "";
+        _result = null;
+        try
+        {
+            var response = await Http.PostAsJsonAsync("/api/Submission", _uploadModel);
+            if (response.IsSuccessStatusCode)
+            {
+                _result = await response.Content.ReadFromJsonAsync<AnalysisResult>();
+            }
+            else
+            {
+                var serverError = await response.Content.ReadAsStringAsync();
+                if (response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    _errorMessage = "Сервис временно недоступен (503). Попробуйте позже.";
+                }
+                else if (!string.IsNullOrWhiteSpace(serverError))
+                {
+                    var cleanError = serverError.Trim('"');
+                    _errorMessage = "Ошибка: " + cleanError;
+                }
+                else
+                {
+                    _errorMessage = $"Ошибка сервера: {response.StatusCode}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Ошибка соединения: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+}

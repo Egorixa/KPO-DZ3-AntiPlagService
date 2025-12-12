@@ -1,0 +1,311 @@
+@page "/search"
+@using Shared
+@inject HttpClient Http
+
+<PageTitle>Кабинет профессора</PageTitle>
+
+<div class="container mt-5">
+    <div class="card shadow mb-4">
+        <div class="card-body bg-light">
+            <h4 class="card-title text-primary mb-3">🔍 Поиск работ по заданию</h4>
+            
+            <div class="input-group">
+                <input @bind="_searchQuery" 
+                       @bind:event="oninput" 
+                       @onkeyup="@Enter"
+                       type="text" 
+                       class="form-control" 
+                       placeholder="Введите название задания (например: Lab1)..."
+                       disabled="@_isLoading">
+                
+                <button class="btn btn-primary" @onclick="SearchWorks" disabled="@_isLoading">
+                    @if (_isLoading && !string.IsNullOrEmpty(_searchQuery))
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span> Ищем...</span>
+                    }
+                    else
+                    {
+                        <span>Найти</span>
+                    }
+                </button>
+                
+                <button class="btn btn-outline-secondary" @onclick="LoadAll" disabled="@_isLoading">
+                    @if (_isLoading && string.IsNullOrEmpty(_searchQuery))
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                        <span> Загрузка...</span>
+                    }
+                    else
+                    {
+                        <span>Сбросить (Показать всё)</span>
+                    }
+                </button>
+            </div>
+            <small class="text-muted">Оставьте пустым и нажмите "Сбросить", чтобы увидеть все работы.</small>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="alert alert-danger d-flex align-items-center" role="alert">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2" viewBox="0 0 16 16">
+                <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+            </svg>
+            <div>
+                <strong>Ошибка:</strong> @_errorMessage
+            </div>
+        </div>
+    }
+
+    @if (_isLoading && string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="text-center mt-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Загрузка данных...</p>
+        </div>
+    }
+    else if (!_groupedReports.Any() && string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="alert alert-info text-center">
+            Ничего не найдено или список пуст.
+        </div>
+    }
+    else
+    {
+        @foreach (var group in _groupedReports)
+        {
+            <div class="card mb-4 shadow-sm border-primary">
+                <div class="card-header bg-white text-primary fw-bold">
+                    Задание: @group.Key
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Студент</th>
+                                    <th>Дата</th>
+                                    <th style="width: 30%;">Результат</th>
+                                    <th>Статус</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in group)
+                                {
+                                    <tr>
+                                        <td class="fw-bold">@item.AuthorName</td>
+                                        <td class="text-muted small">@item.CheckedAt.ToLocalTime().ToString("g")</td>
+                                        <td>
+                                            <div class="progress" style="height: 24px;">
+                                                <div class="progress-bar @GetColor(item.IsPlag)" 
+                                                     role="progressbar" 
+                                                     style="width: @item.PlagPercent%; min-width: 40px;">
+                                                    @item.PlagPercent%
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            @if (item.IsPlag)
+                                            {
+                                                <span class="badge bg-danger">ПЛАГИАТ</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-success">ПРИНЯТО</span>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => ShowDetails(item)">
+                                                Детали
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+    
+    @if (_selectedReport != null)
+    {
+        <div class="modal fade show d-block" style="background: rgba(0,0,0,0.5)">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Студент: @_selectedReport.AuthorName</h5>
+                        <button type="button" class="btn-close" @onclick="() => _selectedReport = null"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Задание:</strong> @_selectedReport.AssignmentName</p>
+                                <p><strong>ID Файла:</strong> <small class="text-muted">@_selectedReport.FileId</small></p>
+
+                                @if (_selectedReport.SourceOfPlagId != null)
+                                {
+                                    <div class="alert alert-warning mt-3">
+                                        <strong>Совпадение найдено!</strong><br />
+                                        ID источника: <small>@_selectedReport.SourceOfPlagId</small>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="alert alert-success mt-3">
+                                        Уникальная работа
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="col-md-6 text-center">
+                                <h6>Облако слов:</h6>
+                                @if (_selectedReport.TopWords != null && _selectedReport.TopWords.Any())
+                                {
+                                    <img src="@GetRainbowCloudUrl(_selectedReport.TopWords)"
+                                         alt="Word Cloud"
+                                         class="img-fluid border rounded shadow-sm"
+                                         style="max-height: 250px;" />
+                                }
+                                else
+                                {
+                                    <p class="text-muted"><small>Нет данных для анализа текста.</small></p>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" @onclick="() => _selectedReport = null">Закрыть</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // методы для работы с данными, состоянием страницы и создания облака слов
+    private List<AnalysisResult> _allReports = new();
+    private IEnumerable<IGrouping<string, AnalysisResult>> _groupedReports = new List<IGrouping<string, AnalysisResult>>();
+    
+    private AnalysisResult? _selectedReport;
+    private bool _isLoading = false;
+    private string _errorMessage = "";
+    private string _searchQuery = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAll();
+    }
+
+    private async Task Enter(KeyboardEventArgs e)
+    {
+        if (e.Code == "Enter" || e.Code == "NumpadEnter")
+        {
+            await SearchWorks();
+        }
+    }
+
+    private async Task SearchWorks()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+        {
+            await LoadAll();
+            return;
+        }
+        _isLoading = true;
+        _errorMessage = "";
+        try
+        {
+            var encodedWorkId = Uri.EscapeDataString(_searchQuery);
+            _allReports = await Http.GetFromJsonAsync<List<AnalysisResult>>($"/api/reports/works/{encodedWorkId}/reports") ?? new();
+            GroupData();
+        }
+        catch (HttpRequestException ex)
+        {
+            HandleError(ex);
+            _allReports.Clear();
+            GroupData();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = "Ошибка соединения. Проверьте подключение к серверу.";
+            Console.WriteLine(ex);
+            _allReports.Clear();
+            GroupData();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task LoadAll()
+    {
+        _searchQuery = ""; 
+        _isLoading = true;
+        _errorMessage = "";
+        
+        try
+        {
+            _allReports = await Http.GetFromJsonAsync<List<AnalysisResult>>("/api/Reports") ?? new();
+            GroupData();
+        }
+        catch (HttpRequestException ex)
+        {
+            HandleError(ex);
+            _groupedReports = new List<IGrouping<string, AnalysisResult>>();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = "Ошибка соединения. Проверьте, запущен ли Gateway.";
+            Console.WriteLine(ex);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+    
+    private void HandleError(HttpRequestException ex)
+    {
+        if (ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+        {
+            _errorMessage = "Сервис анализа временно недоступен (503). Попробуйте позже.";
+        }
+        else if (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _errorMessage = "Данные не найдены.";
+        }
+        else
+        {
+            _errorMessage = $"Не удалось загрузить данные. Код: {ex.StatusCode}";
+        }
+    }
+
+    private void GroupData()
+    {
+        _groupedReports = _allReports
+            .GroupBy(r => string.IsNullOrEmpty(r.AssignmentName) ? "Без названия" : r.AssignmentName)
+            .OrderBy(g => g.Key);
+    }
+
+    private string GetRainbowCloudUrl(List<string> words)
+    {
+        var text = Uri.EscapeDataString(string.Join(" ", words));
+        var rainbowColors = "[\"#ff0000\",\"#ff7f00\",\"#d4af37\",\"#008000\",\"#0000ff\",\"#4b0082\",\"#9400d3\"]";
+        var encodedColors = Uri.EscapeDataString(rainbowColors);
+
+        return $"https://quickchart.io/wordcloud?text={text}&colors={encodedColors}";
+    }
+
+    private void ShowDetails(AnalysisResult report)
+    {
+        _selectedReport = report;
+    }
+
+    private string GetColor(bool isPlag) => isPlag ? "bg-danger" : "bg-success";
+}
